@@ -1,4 +1,5 @@
 #include <ESP8266WiFi.h>
+//#include <ESP8266WiFiMulti.h>   // Include the Wi-Fi-Multi library
 #include <ESP8266mDNS.h>
 #include <WiFiUdp.h>
 #include <ArduinoOTA.h>
@@ -17,14 +18,14 @@
 #define switchPin 13 // Door switch
 
 #define EEROM_SIZE  512
+#define CARD_LEN    5
 
 int programMode = 0; // Initialize program mode to false
 int deleteMode = 0; // Initialize delete mode to false
 int wipeMode = 0; // Initialize wipe mode to false
-//boolean match = false; // initialize card match to false
 
-byte storedCard[6]; // Stores an ID read from EEPROM
-byte readCard[6]; // Sotres an ID read from the RFID reader
+byte storedCard[CARD_LEN+1];  // Stores an ID read from EEPROM
+byte readCard[CARD_LEN+1];    // Sotres an ID read from the RFID reader
 
 int alarm = 0; // Extra Security
 
@@ -46,6 +47,7 @@ long tmOut = 0;
 char msg[MSG_LEN];
 
 long g_now = 0;
+long g_tmo = 0;
 
 void setup() {
   pinMode(passPin, OUTPUT); // Connected to Green on tri-color LED to indicate user is valid
@@ -58,18 +60,27 @@ void setup() {
 #ifdef RX_DEBUG
   Serial.begin(115200);
   Serial.println("\n\nBooting ...");
+  Serial.print("Looking for '");
+  Serial.print(ssid);
+  Serial.println("' ...");
 #endif
 
   rfid.begin(); // Connect to the rfid reader
 
-  WiFi.mode(WIFI_STA);
-  WiFi.begin(ssid, password);
-  while (WiFi.waitForConnectResult() != WL_CONNECTED) {
+  g_tmo = millis();
+  while (WiFi.status() != WL_CONNECTED) {
+    digitalWrite(failPin, HIGH); // Blink with red/internal LED
+    delay(150);
+    digitalWrite(failPin, LOW);
+    delay(150);
+    if ((millis() - g_tmo) > 10000) {
 #ifdef RX_DEBUG
-    Serial.println("Connection Failed! Rebooting...");
+      Serial.println("Connection Failed! Rebooting...");
 #endif
-    delay(5000);
-    ESP.restart();
+      digitalWrite(failPin, HIGH); // Turn on red LED
+      delay(5000);
+      ESP.restart();
+    }
   }
 
   EEPROM.begin(EEROM_SIZE);
@@ -112,10 +123,21 @@ void setup() {
   client.publish("fromGarage", "ready");
   listID();
   g_now = millis();
+  g_tmo = 0;  // WiFi timeout ...
 }
 
 void callback(char* topic, byte* payload, unsigned int length) {
  String strTopic = String((char*)topic);
+
+#ifdef RX_DEBUG
+  Serial.print("Message arrived [");
+  Serial.print(topic);
+  Serial.print("] ");
+  for (int i = 0; i < length; i++) {
+    Serial.print((char)payload[i]);
+  }
+  Serial.println();
+#endif
 
  if(strcmp(topic, "toGarage/door/status") == 0)
  {
@@ -133,34 +155,6 @@ void callback(char* topic, byte* payload, unsigned int length) {
   openDoor(1);
  }
 }
-/*
-void callback(char* topic, byte* payload, unsigned int length) {
-#ifdef RX_DEBUG
-  Serial.print("Message arrived [");
-  Serial.print(topic);
-  Serial.print("] ");
-  for (int i = 0; i < length; i++) {
-    Serial.print((char)payload[i]);
-  }
-  Serial.println();
-#endif
-
-  readCard[0]=0xDE;
-  readCard[1]=0xAD;
-  readCard[2]=0xBE;
-  readCard[3]=0xEF;
-  readCard[4]=0x00;
-
-  switch((char)payload[0]) {
-    case '0':
-    case '1':
-      openDoor(1);
-      break;
-    default:
-      ;
-  }
-}
-*/
 
 void reconnect() {
   // Loop until we're reconnected
@@ -179,14 +173,14 @@ void reconnect() {
       delay(250);
       digitalWrite(passPin, LOW); // Turn off green LED
     } else {
-#ifdef RX_DEBUG
       digitalWrite(failPin, HIGH); // Turn on red LED
+#ifdef RX_DEBUG
       Serial.print("failed, rc=");
       Serial.print(client.state());
       Serial.println(" try again in 5 seconds");
+#endif
       delay(500);
       digitalWrite(failPin, LOW); // Turn off red LED
-#endif
     }
   }
 }
@@ -235,21 +229,34 @@ void checkDoor() {
 }
 
 void loop() {
-  ArduinoOTA.handle();
-
-  if( rfid.available() )
-    rfidloop();
-
-  if (!client.connected()) {
-    long now = millis();
-    if ((now - g_now) > 5000) {
-      reconnect();
-      g_now = millis();
+ 
+  if(WiFi.status() != WL_CONNECTED || WiFi.localIP() == IPAddress(0,0,0,0)) {
+    if( !g_tmo )
+      g_tmo = millis();
+    if ((millis() - g_tmo) > 5000) {
+      // Not connected ... try again ...
+      WiFi.reconnect();
+      g_tmo = 0; // Connected ... ?
     }
   }
 
-  if (client.connected()) {
-    client.loop();
+  if(WiFi.status() == WL_CONNECTED ) {
+    ArduinoOTA.handle();
+  
+    if( rfid.available() )
+      rfidloop();
+  
+    if (!client.connected()) {
+      long now = millis();
+      if ((now - g_now) > 5000) {
+        reconnect();
+        g_now = millis();
+      }
+    }
+  
+    if (client.connected()) {
+      client.loop();
+    }
   }
 
   if(programMode) // Program mode to add a new ID card
@@ -288,7 +295,7 @@ void sendKey (const char *m)
 {
   int n = 0;
   n += snprintf (msg+n, MSG_LEN-n, "%s ", m);
-  for(int k=0; k<5; k++) {
+  for(int k=0; k<CARD_LEN; k++) {
     n += snprintf (msg+n, MSG_LEN-n, "%02X", readCard[k]);
   }
   sendMsg(msg);
@@ -303,25 +310,28 @@ void getID(byte *card)
   rfid.getData(card,length);
 }
 
+void printCard(char *lbl, int pos, byte card[])
+{
+  Serial.print(lbl);
+  Serial.print(" [");
+  Serial.print(pos);
+  Serial.print("] ");
+  printKey(card);
+}
+
 // Read an ID from EEPROM and save it to the storedCard[6] array
 void readID( int number ) // Number = position in EEPROM to get the 5 Bytes from
 {
-  int start = (number * 5 ) - 4; // Figure out starting position
+  int start = (number * CARD_LEN ) - 4; // Figure out starting position
 #ifdef DEBUG
   snprintf (msg, MSG_LEN, "Start: %d\n\n", start);
   Serial.print(msg);
 #endif//DEBUG
-  for ( int i = 0; i < 5; i++ ) // Loop 5 times to get the 5 Bytes
+  for ( int i = 0; i < CARD_LEN; i++ ) // Loop 5 times to get the 5 Bytes
   {
     storedCard[i] = EEPROM.read(start + i); // Assign values read from EEPROM to array
-    /*
-      Serial.print("Read [");
-      Serial.print(start+i);
-      Serial.print("] [");
-      Serial.print(storedCard[i], HEX);
-      Serial.print("] \n");
-    */
   }
+  printCard("Read", start, storedCard);
 }
 
 // Write an array to the EEPROM in the next available slot
@@ -334,20 +344,14 @@ void writeID( byte a[] )
     snprintf (msg, MSG_LEN, "Num: %d\n", num);
     Serial.print(msg);
 #endif//DEBUG
-    int start = ( num * 5 ) + 1; // Figure out where the next slot starts
+    int start = ( num * CARD_LEN ) + 1; // Figure out where the next slot starts
     num++; // Increment the counter by one
     EEPROM.write( 0, num ); // Write the new count to the counter
-    for ( int j = 0; j < 5; j++ ) // Loop 5 times
+    for ( int j = 0; j < CARD_LEN; j++ ) // Loop 5 times
     {
       EEPROM.write( start + j, a[j] ); // Write the array values to EEPROM in the right position
-      /*
-        Serial.print("W[");
-        Serial.print(start+j);
-        Serial.print("] Value [");
-        Serial.print(a[j], HEX);
-        Serial.print("] \n");
-      */
     }
+    printCard("Write", start, a);
     EEPROM.commit();
     successWrite();
   }
@@ -368,7 +372,7 @@ void deleteID( byte a[] )
   {
     int num = EEPROM.read(0); // Get the numer of used spaces, position 0 stores the number of ID cards
     int slot; // Figure out the slot number of the card
-    int start;// = ( num * 5 ) + 1; // Figure out where the next slot starts
+    int start;// Figure out where the next slot starts
     int looping; // The number of times the loop repeats
     int j;
 
@@ -378,23 +382,16 @@ void deleteID( byte a[] )
     Serial.print(msg);
 #endif//DEBUG
     slot = findIDSLOT( a ); //Figure out the slot number of the card to delete
-    start = (slot * 5) - 4;
-    looping = ((num - slot) * 5);
+    start = (slot * CARD_LEN) - 4;
+    looping = ((num - slot) * CARD_LEN);
     num--; // Decrement the counter by one
     EEPROM.write( 0, num ); // Write the new count to the counter
 
     for ( j = 0; j < looping; j++ ) // Loop the card shift times
     {
-      EEPROM.write( start + j, EEPROM.read(start + 5 + j)); // Shift the array values to 5 places earlier in the EEPROM
-      /*
-        Serial.print("W[");
-        Serial.print(start+j);
-        Serial.print("] Value [");
-        Serial.print(a[j], HEX);
-        Serial.print("] \n");
-      */
+      EEPROM.write( start + j, EEPROM.read(start + CARD_LEN + j)); // Shift the array values to 5 places earlier in the EEPROM
     }
-    for ( int k = 0; k < 5; k++ ) //Shifting loop
+    for ( int k = 0; k < CARD_LEN; k++ ) //Shifting loop
     {
       EEPROM.write( start + j + k, 0);
     }
@@ -446,7 +443,7 @@ int findIDSLOT( byte find[] )
 void printKey ( byte a[] )
 {
   Serial.print("[");
-  for ( int k = 0; k < 5; k++ ) { // Loop 5 times
+  for ( int k = 0; k < CARD_LEN; k++ ) { // Loop 5 times
     snprintf(msg, 20, "%02X", a[k]);
     Serial.print(msg);
   }
@@ -457,10 +454,10 @@ void printKeys ( byte a[], byte b[] )
 {
 #ifdef DEBUG
   Serial.print("[");
-  for ( int k = 0; k < 5; k++ ) // Loop 5 times
+  for ( int k = 0; k < CARD_LEN; k++ ) // Loop 5 times
     Serial.print(a[k], HEX);
   Serial.print("] -- [");
-  for ( int k = 0; k < 5; k++ ) // Loop 5 times
+  for ( int k = 0; k < CARD_LEN; k++ ) // Loop 5 times
     Serial.print(b[k], HEX);
   Serial.println("]");
 #endif
@@ -474,13 +471,14 @@ boolean checkTwo ( byte a[], byte b[] )
 
   printKeys(a, b);
 
-  boolean match = true; // Assume they match at first
-  for ( int k = 0; match && k < 5; k++ ) // Loop 5 times
+  return memcmp(a, b, CARD_LEN) == 0;
+/*  boolean match = true; // Assume they match at first
+  for ( int k = 0; match && k < CARD_LEN; k++ ) // Loop 5 times
   {
     if ( a[k] != b[k] ) // IF a != b then set match = false, one fails, all fail
       match = false;
   }
-  return match;
+  return match;*/
 }
 
 // Looks in the EEPROM to try to match any of the EEPROM ID's with the passed ID
