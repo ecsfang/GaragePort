@@ -5,6 +5,7 @@
 #include <PubSubClient.h>
 #include <EEPROM.h> // Needed to write to EEPROM storage
 #include <rdm630.h>
+#include "mySSID.h"
 
 #define RX_DEBUG 1
 
@@ -26,10 +27,6 @@ byte storedCard[6]; // Stores an ID read from EEPROM
 byte readCard[6]; // Sotres an ID read from the RFID reader
 
 int alarm = 0; // Extra Security
-
-const char* ssid = AN_SSID;
-const char* password = A_PASSWORD;
-const char* mqtt_server = A_SERVER;
 
 int doorStatus = 99;
 
@@ -77,13 +74,6 @@ void setup() {
 
   ArduinoOTA.setHostname("garageDoor");
 
-  // No authentication by default
-  // ArduinoOTA.setPassword("admin");
-
-  // Password can be set with it's md5 value as well
-  // MD5(admin) = 21232f297a57a5a743894a0e4a801fc3
-  // ArduinoOTA.setPasswordHash("21232f297a57a5a743894a0e4a801fc3");
-
   ArduinoOTA.onStart([]() {
     String type;
     if (ArduinoOTA.getCommand() == U_FLASH)
@@ -117,7 +107,7 @@ void setup() {
   client.setServer(mqtt_server, 1883);
   client.setCallback(callback);
   // Once connected, publish an announcement...
-  //client.publish("fromGarage", "ready");
+  client.publish("fromGarage", "ready");
   listID();
 }
 
@@ -131,6 +121,11 @@ void callback(char* topic, byte* payload, unsigned int length) {
  }
 
  if(strcmp(topic, "toGarage/door/open") == 0)
+ {
+  openDoor(1);
+ }
+
+ if(strcmp(topic, "toGarage/door/erase") == 0)
  {
   openDoor(1);
  }
@@ -171,7 +166,7 @@ void reconnect() {
     Serial.print("Attempting another MQTT connection...");
 #endif
     // Attempt to connect
-    if (client.connect("aESP8266Client")) {
+    if (client.connect("theGarageClient")) {
       Serial.println("connected");
       // Once connected, publish an announcement...
       client.publish("fromGarage", "ready");
@@ -714,6 +709,23 @@ void wipeModeOn()
   digitalWrite(failPin, HIGH); // Make sure green LED is on
 }
 
+void WipeMemory()
+{
+  Serial.println("Wipe!");
+  wipeMode = true; // If so, enable deletion mode
+  alarm = 0;
+  rfid.flush();
+  wipeModeOn();
+  sendMsg("wipe");
+  for (int i = 0; i < EEROM_SIZE; i++) // Loop repeats equal to the number of array in EEPROM
+  {
+    EEPROM.write(i, 0);
+  }
+  EEPROM.commit();
+  wipeMode = false;
+  normalModeOn(); // Normal mode, blue Power LED is on, all others are off
+  rfid.flush();
+}
 
 void rfidloop ()
 {
@@ -777,7 +789,8 @@ void rfidloop ()
     }
     else if ( isWipe( readCard ) ) // Check to see if the card is the deletion card
     {
-      Serial.println("Wipe!");
+      WipeMemory();
+/*      Serial.println("Wipe!");
       wipeMode = true; // If so, enable deletion mode
       alarm = 0;
       rfid.flush();
@@ -790,7 +803,7 @@ void rfidloop ()
       EEPROM.commit();
       wipeMode = false;
       normalModeOn(); // Normal mode, blue Power LED is on, all others are off
-      rfid.flush();
+      rfid.flush();*/
     }
     else
     {
