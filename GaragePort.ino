@@ -45,6 +45,8 @@ long tmOut = 0;
 #define MSG_LEN 50
 char msg[MSG_LEN];
 
+long g_now = 0;
+
 void setup() {
   pinMode(passPin, OUTPUT); // Connected to Green on tri-color LED to indicate user is valid
   pinMode(failPin, OUTPUT); // Connected to Red on tri-color LED to indicate user is NOT valid or read failed
@@ -109,6 +111,7 @@ void setup() {
   // Once connected, publish an announcement...
   client.publish("fromGarage", "ready");
   listID();
+  g_now = millis();
 }
 
 void callback(char* topic, byte* payload, unsigned int length) {
@@ -161,25 +164,29 @@ void callback(char* topic, byte* payload, unsigned int length) {
 
 void reconnect() {
   // Loop until we're reconnected
-  while (!client.connected()) {
+  if(!client.connected()) {
 #ifdef RX_DEBUG
     Serial.print("Attempting another MQTT connection...");
 #endif
     // Attempt to connect
     if (client.connect("theGarageClient")) {
+      digitalWrite(passPin, HIGH); // Turn on green LED
       Serial.println("connected");
       // Once connected, publish an announcement...
       client.publish("fromGarage", "ready");
       // ... and resubscribe
       client.subscribe("toGarage/#");
+      delay(250);
+      digitalWrite(passPin, LOW); // Turn off green LED
     } else {
 #ifdef RX_DEBUG
+      digitalWrite(failPin, HIGH); // Turn on red LED
       Serial.print("failed, rc=");
       Serial.print(client.state());
       Serial.println(" try again in 5 seconds");
+      delay(500);
+      digitalWrite(failPin, LOW); // Turn off red LED
 #endif
-      // Wait 5 seconds before retrying
-      delay(5000);
     }
   }
 }
@@ -188,21 +195,25 @@ void rfidloop();
 
 void sendMsg(const char *m)
 {
+  if (client.connected()) {
 #ifdef RX_DEBUG
-  Serial.print("Publish message: ");
-  Serial.println(m);
+    Serial.print("Publish message: ");
+    Serial.println(m);
 #endif
-  client.publish("fromGarage", m);
+    client.publish("fromGarage", m);
+  }
 }
 
 void sendMsg(const char *topic, const char *m)
 {
+  if (client.connected()) {
 #ifdef RX_DEBUG
-  Serial.print("Publish message: ");
-  Serial.println(m);
+    Serial.print("Publish message: ");
+    Serial.println(m);
 #endif
-  snprintf (msg, MSG_LEN, "fromGarage/%s", topic);
-  client.publish(msg, m);
+    snprintf (msg, MSG_LEN, "fromGarage/%s", topic);
+    client.publish(msg, m);
+  }
 }
 
 void checkDoor() {
@@ -230,7 +241,11 @@ void loop() {
     rfidloop();
 
   if (!client.connected()) {
-    reconnect();
+    long now = millis();
+    if ((now - g_now) > 5000) {
+      reconnect();
+      g_now = millis();
+    }
   }
 
   if (client.connected()) {
