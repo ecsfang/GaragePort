@@ -12,10 +12,10 @@
 
 #define failPin   14 // Red LED
 #define passPin   12 // Green LED
-#define doorPin    4 // Relay
+#define relayPin   4 // Relay
 #define rfidPinRx  5 // RDM630 Reader
 #define rfidPinTx  0 // RDM630 Reader
-#define switchPin 13 // Door switch
+#define sensorPin 13 // Door switch
 
 #define EEROM_SIZE  512
 #define CARD_LEN    5
@@ -30,6 +30,12 @@ byte readCard[CARD_LEN+1];    // Sotres an ID read from the RFID reader
 int alarm = 0; // Extra Security
 
 int doorStatus = 99;
+
+#define PULSE_TIME 1000 // Heartbeat - 1 Hz
+
+unsigned int  heartBeat = 0;
+unsigned long beatStart = 0;        // the time the delay started
+bool          beatRunning = false;  // true if still waiting for delay to finish
 
 void checkDoor();
 void openDoor( int setDelay );
@@ -49,11 +55,12 @@ char msg[MSG_LEN];
 long g_now = 0;
 long g_tmo = 0;
 
+
 void setup() {
-  pinMode(passPin, OUTPUT); // Connected to Green on tri-color LED to indicate user is valid
-  pinMode(failPin, OUTPUT); // Connected to Red on tri-color LED to indicate user is NOT valid or read failed
-  pinMode(doorPin, OUTPUT); // Connected to relay to activate the door lock
-  pinMode(switchPin, INPUT); // Connected to magnetic switch on the door
+  pinMode(passPin,   OUTPUT); // Connected to Green on tri-color LED to indicate user is valid
+  pinMode(failPin,   OUTPUT); // Connected to Red on tri-color LED to indicate user is NOT valid or read failed
+  pinMode(relayPin,  OUTPUT); // Connected to relay to activate the door lock
+  pinMode(sensorPin, INPUT);  // Connected to magnetic switch on the door
 
   alarm = 0;
 
@@ -113,21 +120,26 @@ void setup() {
   });
   ArduinoOTA.begin();
 #ifdef RX_DEBUG
-  Serial.println("GaragePort v2 -- Ready!");
+  Serial.println("GaragePort v3 -- Ready!");
   Serial.print("IP address: ");
   Serial.println(WiFi.localIP());
 #endif
   client.setServer(mqtt_server, 1883);
   client.setCallback(callback);
   // Once connected, publish an announcement...
-  client.publish("fromGarage", "ready");
+  sendMsg("ready");
   listID();
   g_now = millis();
+  beatStart = millis();
   g_tmo = 0;  // WiFi timeout ...
+  beatRunning = true;
+
+  // Start keeping an eye on the door-switch ...
+  attachInterrupt(digitalPinToInterrupt(sensorPin), checkDoor, CHANGE);
 }
 
 void callback(char* topic, byte* payload, unsigned int length) {
- String strTopic = String((char*)topic);
+  String strTopic = String((char*)topic);
 
 #ifdef RX_DEBUG
   Serial.print("Message arrived [");
@@ -167,7 +179,7 @@ void reconnect() {
       digitalWrite(passPin, HIGH); // Turn on green LED
       Serial.println("connected");
       // Once connected, publish an announcement...
-      client.publish("fromGarage", "ready");
+      sendMsg("ready");
       // ... and resubscribe
       client.subscribe("toGarage/#");
       delay(250);
@@ -187,31 +199,30 @@ void reconnect() {
 
 void rfidloop();
 
-void sendMsg(const char *m)
+void sendMsg(const char *topic, const char *m)
 {
+  int n = 0;
   if (client.connected()) {
+    n = snprintf (msg, MSG_LEN, "fromGarage");
+    if( topic )
+      n += snprintf (msg+n, MSG_LEN-n, "/%s", topic);
+    client.publish(msg, m);
 #ifdef RX_DEBUG
     Serial.print("Publish message: ");
+    Serial.print(msg);
+    Serial.print(" ");
     Serial.println(m);
 #endif
-    client.publish("fromGarage", m);
   }
 }
 
-void sendMsg(const char *topic, const char *m)
+void sendMsg(const char *m)
 {
-  if (client.connected()) {
-#ifdef RX_DEBUG
-    Serial.print("Publish message: ");
-    Serial.println(m);
-#endif
-    snprintf (msg, MSG_LEN, "fromGarage/%s", topic);
-    client.publish(msg, m);
-  }
+  sendMsg(NULL, m);
 }
 
 void checkDoor() {
-  int b = digitalRead(switchPin);
+  int b = digitalRead(sensorPin);
   if( b != doorStatus ) {
     switch(b) {
       case HIGH:
@@ -229,7 +240,8 @@ void checkDoor() {
 }
 
 void loop() {
- 
+
+  // If WiFi connection is lost - try again every 5 seconds ...
   if(WiFi.status() != WL_CONNECTED || WiFi.localIP() == IPAddress(0,0,0,0)) {
     if( !g_tmo )
       g_tmo = millis();
@@ -240,11 +252,9 @@ void loop() {
     }
   }
 
+  // If we have WiFi connection - do the other network stuff ...
   if(WiFi.status() == WL_CONNECTED ) {
     ArduinoOTA.handle();
-  
-    if( rfid.available() )
-      rfidloop();
   
     if (!client.connected()) {
       long now = millis();
@@ -259,6 +269,10 @@ void loop() {
     }
   }
 
+  // If the rfid-reader is available, check it out ...
+  if( rfid.available() )
+    rfidloop();
+
   if(programMode) // Program mode to add a new ID card
   {
     programModeOn();
@@ -268,8 +282,16 @@ void loop() {
     deleteModeOn();
   }
 
-  checkDoor();
+  if( (heartBeat % (10*60)) == 0 ) {
+    // Every 10 minutes ...
+    doorStatus = 99;
+    checkDoor();
+  }
 
+  if (beatRunning && ((millis() - beatStart) >= PULSE_TIME)) {
+    beatStart += PULSE_TIME; // this prevents drift in the delays
+    heartBeat++;
+  }
 }
 
 // Ascii -> Hex conversion
@@ -509,11 +531,11 @@ void openDoor( int setDelay )
   setDelay *= 1000; // Sets delay in seconds
   digitalWrite(failPin, LOW); // Turn off red LED
   digitalWrite(passPin, HIGH); // Turn on green LED
-  digitalWrite(doorPin, HIGH); // Unlock door!
+  digitalWrite(relayPin, HIGH); // Unlock door!
 
   delay(setDelay); // Hold door lock open for some seconds
 
-  digitalWrite(doorPin, LOW); // Relock door
+  digitalWrite(relayPin, LOW); // Relock door
 
   delay(setDelay); // Hold green LED on for some more seconds
 
@@ -559,9 +581,9 @@ boolean isDelete( byte test[] )
 // Controls LED's for Normal mode, Blue on, all others off
 void normalModeOn()
 {
-  digitalWrite(passPin, LOW); // Make sure Green LED is off
-  digitalWrite(failPin, LOW); // Make sure Red LED is off
-  digitalWrite(doorPin, LOW); // Make sure Door is Locked
+  digitalWrite(passPin,  LOW); // Make sure Green LED is off
+  digitalWrite(failPin,  LOW); // Make sure Red LED is off
+  digitalWrite(relayPin, LOW); // Make sure Door is Locked
   programMode = deleteMode = 0;
 }
 
