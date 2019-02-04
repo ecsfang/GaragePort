@@ -324,9 +324,9 @@ void printCard(char *lbl, int pos, RFIDtag card)
 }
 
 // Read an ID from EEPROM and save it to the storedCard variable
-void readID( int number ) // Number = position in EEPROM to get the 5 Bytes from
+void readID( int number ) // Number = position in EEPROM to get the card bytes from
 {
-  int start = (number * _tagLength ) - 4; // Figure out starting position
+  int start = (number * _tagLength ) + 1; // Figure out starting position
 #ifdef DEBUG
   snprintf (msg, MSG_LEN, "Start: %d\n\n", start);
   Serial.print(msg);
@@ -385,7 +385,7 @@ void deleteID( RFIDtag a )
     Serial.print(msg);
 #endif//DEBUG
     slot = findIDSLOT( a ); //Figure out the slot number of the card to delete
-    start = (slot * _tagLength) - 4;
+    start = ((slot-1) * _tagLength) + 1;
     looping = ((num - slot) * _tagLength);
     num--; // Decrement the counter by one
     EEPROM.write( 0, num ); // Write the new count to the counter
@@ -412,12 +412,12 @@ int listID()
   snprintf (msg, MSG_LEN, "Count: %d\n\n", count);
   Serial.print(msg);
 #endif//DEBUG
-  for ( int i = 1; i <= count; i++ ) // Loop once for each EEPROM entry
+  for ( int i = 0; i < count; i++ ) // Loop once for each EEPROM entry
   {
     readID(i); // Read an ID from EEPROM, it is stored in storedCard[6]
 #ifdef DEBUG
     Serial.print("Card ");
-    Serial.print(i);
+    Serial.print(i+1);
     Serial.print(": ");
 #endif
     printKey(storedCard);
@@ -432,13 +432,13 @@ int findIDSLOT( RFIDtag find )
   snprintf (msg, MSG_LEN, "Count: %d\n\n", count); // stores the number of ID's in EEPROM
   Serial.print(msg);
 #endif//DEBUG
-  for ( int i = 1; i <= count; i++ ) // Loop once for each EEPROM entry
+  for ( int i = 0; i < count; i++ ) // Loop once for each EEPROM entry
   {
     readID(i); // Read an ID from EEPROM, it is stored in storedCard[6]
     if ( find == storedCard ) // Check to see if the storedCard read from EEPROM
     { // is the same as the find[] ID card passed
       Serial.print("FindIDSLOT: We have a matched card!!! \n");
-      return i; // The slot number of the card
+      return i+1; // The slot number of the card
     }
   }
 }
@@ -471,7 +471,7 @@ boolean findID( RFIDtag find )
   snprintf (msg, MSG_LEN, "Count: %d\n\n", count); // stores the number of ID's in EEPROM
   Serial.print(msg);
 #endif//DEBUG
-  for ( int i = 1; i <= count; i++ ) // Loop once for each EEPROM entry
+  for ( int i = 0; i < count; i++ ) // Loop once for each EEPROM entry
   {
     readID(i); // Read an ID from EEPROM, it is stored in storedCard[6]
     if ( find == storedCard ) // Check to see if the storedCard read from EEPROM
