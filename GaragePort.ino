@@ -279,8 +279,7 @@ void loop() {
     ArduinoOTA.handle();
   
     if (!client.connected()) {
-      long now = millis();
-      if ((now - g_now) > TIMEOUT_DLY) {
+      if ((millis() - g_now) > TIMEOUT_DLY) {
         reconnect();
         g_now = millis();
       }
