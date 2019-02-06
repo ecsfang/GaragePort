@@ -1,5 +1,3 @@
-#define   RFID
-
 #include <ESP8266WiFi.h>
 #include <ESP8266mDNS.h>
 #include <WiFiUdp.h>
@@ -118,6 +116,7 @@ void setup() {
   }
 
   ArduinoOTA.setHostname("garageDoor");
+  ArduinoOTA.setPassword(flashpw);
 
   ArduinoOTA.onStart([]() {
     String type;
@@ -317,21 +316,6 @@ void loop() {
   }
 }
 
-#if 0
-// Ascii -> Hex conversion
-byte Asc2Hex(byte val)
-{
-  byte hex = 0;
-  if ( (val >= '0' ) && ( val <= '9' ) )
-    hex = val - '0';
-  else if ( ( val >= 'a' ) && ( val <= 'f' ) )
-    hex = 10 + val - 'a';
-  else if ( ( val >= 'A' ) && ( val <= 'F' ) )
-    hex = 10 + val - 'A';
-  return hex;
-}
-#endif
-
 void sendKey (const char *m, RFIDtag card)
 {
   int n = 0;
@@ -348,9 +332,6 @@ void printTag( RFIDtag tag )
 
 void printKey( RFIDtag tag )
 {
-//  Serial.print("[");
-//  Serial.print(tag.getTag());   // get TAG in ascii format
-//  Serial.print("] (");
   printTag(tag);
   Serial.print(" (");
   Serial.print(tag.getCardNumber());  // get cardNumber in long format
