@@ -82,7 +82,14 @@ void setup() {
 
 #ifdef RX_DEBUG
   Serial.begin(115200);
+  delay(2500);
   Serial.println("\n\nBooting ...");
+#endif
+
+  WiFi.mode(WIFI_STA);
+  WiFi.begin(ssid, password);
+
+#ifdef RX_DEBUG
   Serial.print("Looking for '");
   Serial.print(ssid);
   Serial.println("' ...");
@@ -90,6 +97,7 @@ void setup() {
 
   g_tmo = millis();
   while (WiFi.status() != WL_CONNECTED) {
+    Serial.print(".");
     flashLed("R0", 1, 150);  // Blink with red/internal LED
     if ((millis() - g_tmo) > (TIMEOUT_DLY*2)) {
 #ifdef RX_DEBUG
@@ -105,6 +113,15 @@ void setup() {
 
   EHead_t eHead;
   EEPROM.get(0, eHead);
+
+#ifdef RX_DEBUG
+  Serial.println("\n\nEEPROM");
+  Serial.print("Head: ");
+  Serial.println(eHead.hash, HEX);
+  Serial.print("Count: ");
+  Serial.println(eHead.num);
+#endif
+
   if( eHead.hash != HASH_TAG ) {
     // EEPROM in bad shape ... reinitialize ... !
 #ifdef RX_DEBUG
@@ -303,13 +320,15 @@ void loop() {
     deleteModeOn();
   }
 
-  if( (heartBeat % (10*60)) == 0 ) {
-    // Check the door every 10 minutes ...
-    doorStatus = 99;
-    checkDoor();
-  }
 
   if (beatRunning && ((millis() - beatStart) >= PULSE_TIME)) {
+    // New heartbeat ...
+    if( (heartBeat % (10*60)) == 0 ) {
+      // Check the door every 10 minutes ...
+      doorStatus = 99;
+      checkDoor();
+    }
+    // Update beat counter ...
     beatStart += PULSE_TIME; // this prevents drift in the delays
     heartBeat++;
   }
@@ -605,21 +624,25 @@ void flashLed(char *ledPgm, int loop, int dly)
   char *led;
   while( loop-- ) {
     led = ledPgm;
-    while(led) {
+    while(*led) {
       switch(*led++) {
         case '0':
+          Serial.print("0");
           digitalWrite(failPin, LOW); // Make sure red LED is off
           digitalWrite(passPin, LOW); // Make sure green LED is off
           break;
         case 'R':
+          Serial.print("R");
           digitalWrite(failPin, HIGH); // Make sure red LED is on
           digitalWrite(passPin, LOW); // Make sure green LED is off
           break;
         case 'G':
+          Serial.print("G");
           digitalWrite(failPin, LOW); // Make sure red LED is off
           digitalWrite(passPin, HIGH); // Make sure green LED is on
           break;
         case '*':
+          Serial.print("*");
           digitalWrite(failPin, HIGH); // Make sure red LED is on
           digitalWrite(passPin, HIGH); // Make sure green LED is on
           break;
@@ -627,6 +650,7 @@ void flashLed(char *ledPgm, int loop, int dly)
       delay(dly);
     }
   }
+  Serial.println();
 }
 // Flashes the green LED 3 times to indicate a successful write to EEPROM
 void successWrite()
