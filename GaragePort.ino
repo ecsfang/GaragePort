@@ -7,14 +7,15 @@
 #include <RFIDRdm630.h>
 #include "mySSID.h"
 
-#define RX_DEBUG 1
+//#define RX_DEBUG 1
 
-#define failPin   14 // Red LED
-#define passPin   12 // Green LED
-#define relayPin   4 // Relay
-#define rfidPinRx  5 // RDM630 Reader
-#define rfidPinTx  0 // RDM630 Reader
-#define sensorPin 13 // Door switch
+#define failPin   D5 // 14 // Red LED
+#define passPin   D6 // 12 // Green LED
+#define relayPin  D2 //  4 // Relay
+#define rfidPinRx D1 //  5 // RDM630 Reader
+#define rfidPinTx D3 //  0 // RDM630 Reader
+#define cardInt   D8 // 15 // RDM630 interrupt
+#define sensorPin D7 // 13 // Door switch
 
 #define EEROM_SIZE  512
 #define CARD_LEN    5
@@ -73,6 +74,7 @@ void setup() {
   pinMode(failPin,   OUTPUT); // Connected to Red on tri-color LED to indicate user is NOT valid or read failed
   pinMode(relayPin,  OUTPUT); // Connected to relay to activate the door lock
   pinMode(sensorPin, INPUT);  // Connected to magnetic switch on the door
+  pinMode(cardInt,   INPUT);  // Connected to RDM630 interrupt pin
 
   digitalWrite(failPin,  LOW);
   digitalWrite(passPin,  LOW);
@@ -80,8 +82,9 @@ void setup() {
 
   alarm = 0;
 
-#ifdef RX_DEBUG
   Serial.begin(115200);
+
+#ifdef RX_DEBUG
   delay(2500);
   Serial.println("\n\nBooting ...");
 #endif
@@ -97,7 +100,9 @@ void setup() {
 
   g_tmo = millis();
   while (WiFi.status() != WL_CONNECTED) {
+#ifdef RX_DEBUG
     Serial.print(".");
+#endif
     flashLed("R0", 1, 150);  // Blink with red/internal LED
     if ((millis() - g_tmo) > (TIMEOUT_DLY*2)) {
 #ifdef RX_DEBUG
@@ -167,6 +172,7 @@ void setup() {
 #endif
   client.setServer(mqtt_server, 1883);
   client.setCallback(callback);
+
   // Once connected, publish an announcement...
   sendMsg("ready");
   listID();
@@ -177,6 +183,8 @@ void setup() {
 
   // Start keeping an eye on the door-switch ...
   attachInterrupt(digitalPinToInterrupt(sensorPin), checkDoor, CHANGE);
+  // ... and the RFID-reader ...
+  attachInterrupt(cardInt, rfidloop, FALLING);
 }
 
 void callback(char* topic, byte* payload, unsigned int length) {
@@ -307,9 +315,11 @@ void loop() {
     }
   }
 
-  // If the rfid-reader is available, check it out ...
+#if 0
+// If the rfid-reader is available, check it out ...
   if( reader.isAvailable() )
     rfidloop();
+#endif
 
   if(programMode) // Program mode to add a new ID card
   {
@@ -358,12 +368,10 @@ void printKey( RFIDtag tag )
 
 void printKeys ( RFIDtag a, RFIDtag b )
 {
-#ifdef DEBUG
   printTag(a);
   Serial.print(" -- ");
   printTag(b);
   Serial.println();
-#endif
 }
 
 void printCard(char *lbl, int pos, RFIDtag card)
@@ -371,8 +379,10 @@ void printCard(char *lbl, int pos, RFIDtag card)
   Serial.print(lbl);
   Serial.print(" [");
   Serial.print(pos);
+#ifdef RX_DEBUG
   Serial.print("@");
   Serial.print(GET_ROM_ADDRESS(pos));
+#endif
   Serial.print("] ");
   printKey(card);
 }
@@ -413,10 +423,10 @@ void deleteID( RFIDtag a )
 
   if ( slot < 0 ) // Before we delete from the EEPROM, check to see if we have this card!
   {
-#ifdef DEBUG
+#ifdef RX_DEBUG
     snprintf (msg, MSG_LEN, "Can't find '%s'!\n\n", a.getTag()); // stores the number of ID's in EEPROM
     Serial.print(msg);
-#endif//DEBUG
+#endif//RX_DEBUG
     failedWrite(); // ID not found in EEPROM ...
   }
   else
@@ -424,10 +434,10 @@ void deleteID( RFIDtag a )
     EHead_t eHead;
     EEPROM.get(0, eHead); // Get the numer of used spaces, position 0 stores the number of ID cards
 
-#ifdef DEBUG
+#ifdef RX_DEBUG
     snprintf (msg, MSG_LEN, "Count: %d\n\n", eHead.num); // stores the number of ID's in EEPROM
     Serial.print(msg);
-#endif//DEBUG
+#endif//RX_DEBUG
 
     // Shift down rest of the entries ...
     for ( ; slot < (eHead.num-1); slot++ ) // Loop the card shift times
@@ -448,17 +458,17 @@ int listID()
 {
   EHead_t eHead;
   EEPROM.get(0, eHead); // Read the first Byte of EEPROM that
-#ifdef DEBUG
+#ifdef RX_DEBUG
   if( eHead.num )
     snprintf (msg, MSG_LEN, "Found %d cards in EEPROM\n\n", eHead.num, eHead.num > 1 ? "cards" : "card");
   else
     snprintf (msg, MSG_LEN, "No cards found in EEPROM!!\n\n");
   Serial.print(msg);
-#endif//DEBUG
+#endif//RX_DEBUG
   for ( int i = 0; i < eHead.num; i++ ) // Loop once for each EEPROM entry
   {
     readID(i); // Read an ID from EEPROM, it is stored in storedCard[6]
-#ifdef DEBUG
+#ifdef RX_DEBUG
     printCard("Card", i, storedCard);
 #else
     printKey(storedCard);
@@ -472,10 +482,10 @@ int findID( RFIDtag find )
 {
   EHead_t eHead;
   EEPROM.get(0, eHead); // Read the first Byte of EEPROM that
-#ifdef DEBUG
+#ifdef RX_DEBUG
   snprintf (msg, MSG_LEN, "Count: %d\n\n", eHead.num); // stores the number of ID's in EEPROM
   Serial.print(msg);
-#endif//DEBUG
+#endif//RX_DEBUG
   for ( int i = 0; i < eHead.num; i++ ) // Loop once for each EEPROM entry
   {
     readID(i); // Read an ID from EEPROM, it is stored in storedCard[6]
@@ -494,10 +504,10 @@ boolean findID( RFIDtag find )
 {
   EHead_t eHead;
   EEPROM.get(0, eHead); // Read the header of the EEPROM
-#ifdef DEBUG
+#ifdef RX_DEBUG
   snprintf (msg, MSG_LEN, "Count: %d\n\n", eHead.num);
   Serial.print(msg);
-#endif//DEBUG
+#endif//RX_DEBUG
   for ( int i = 0; i < eHead.num; i++ ) // Loop once for each EEPROM entry
   {
     readID(i); // Read an ID from EEPROM, it is stored in storedCard[6]
@@ -715,86 +725,88 @@ void WipeMemory()
   normalModeOn(); // Normal mode, blue Power LED is on, all others are off
 }
 
-void rfidloop ()
+void rfidloop()
 {
-  readCard = reader.getTag();  // if true, then receives a tag object
-  Serial.print("Got a card: ");
-  printKey(readCard);
+  if( reader.isAvailable() ) {
+    readCard = reader.getTag();  // if true, then receives a tag object
+    Serial.print("Got a card: ");
+    printKey(readCard);
 
-  if ( programMode) // Program mode to add a new ID card
-  {
-    Serial.println("Program mode!");
-    // Check to see if it is the master programing card or delete card
-    if ( isMaster(readCard) || isDelete(readCard) || isWipe(readCard))
+    if ( programMode) // Program mode to add a new ID card
     {
-      return; // Ignore!
-    }
-    else
-    {
-      writeID(readCard); // If not, write the card to the EEPROM storage
-      sendKey("add", readCard);
-    }
-    normalModeOn();
-  }
-  else if ( deleteMode ) // Delete mode to delete an added ID card
-  {
-    Serial.println("Delete mode!");
-    // Check to see if it is the master programing card or the Delete Card
-    if ( isMaster(readCard) || isDelete(readCard) || isWipe(readCard) )
-    {
-      return; // Ignore!
-    }
-    else
-    {
-      deleteID(readCard); // If not, delete the card from the EEPROM sotrage
-      sendKey("del", readCard);
-    }
-    normalModeOn();
-  }
-  else if ( wipeMode ) // Wipe mode to wipe out the EEPROM
-  {
-    Serial.println("Wipe mode!?");
-  }
-  // Normal Operation...
-  else
-  {
-    Serial.println("Handle card ...");
-    if ( isMaster( readCard ) ) // Check to see if the card is the master programing card
-    {
-      Serial.println("Master!");
-      programMode = 1; // If so, enable programing mode
-      tmOut = millis();
-      alarm = 0;
-      programModeOn(); // Program Mode cycles through RGB waiting to read a new card
-    }
-    else if ( isDelete( readCard ) ) // Check to see if the card is the deletion card
-    {
-      Serial.println("Delete!");
-      deleteMode = 1; // If so, enable deletion mode
-      tmOut = millis();
-      alarm = 0;
-      deleteModeOn(); // Delete Mode cycles through RB waiting to read a new card
-    }
-    else if ( isWipe( readCard ) ) // Check to see if the card is the deletion card
-    {
-      Serial.println("Wipe!");
-      WipeMemory();
-    }
-    else
-    {
-      if ( findID(readCard) >= 0 ) // If not, see if the card is in the EEPROM
+      Serial.println("Program mode!");
+      // Check to see if it is the master programing card or delete card
+      if ( isMaster(readCard) || isDelete(readCard) || isWipe(readCard))
       {
-        Serial.println("Valid card - press button!");
-        openDoor(1); // If it is, open the door lock
-        alarm = 0;
+        return; // Ignore!
       }
       else
       {
-        Serial.println("Unknown card!");
-        sendKey("fail", readCard);
-        failed(); // If not, show that the ID was not valid
-        alarm++;
-        delay(1000);
+        writeID(readCard); // If not, write the card to the EEPROM storage
+        sendKey("add", readCard);
+      }
+      normalModeOn();
+    }
+    else if ( deleteMode ) // Delete mode to delete an added ID card
+    {
+      Serial.println("Delete mode!");
+      // Check to see if it is the master programing card or the Delete Card
+      if ( isMaster(readCard) || isDelete(readCard) || isWipe(readCard) )
+      {
+        return; // Ignore!
+      }
+      else
+      {
+        deleteID(readCard); // If not, delete the card from the EEPROM sotrage
+        sendKey("del", readCard);
+      }
+      normalModeOn();
+    }
+    else if ( wipeMode ) // Wipe mode to wipe out the EEPROM
+    {
+      Serial.println("Wipe mode!?");
+    }
+    // Normal Operation...
+    else
+    {
+      Serial.println("Handle card ...");
+      if ( isMaster( readCard ) ) // Check to see if the card is the master programing card
+      {
+        Serial.println("Master!");
+        programMode = 1; // If so, enable programing mode
+        tmOut = millis();
+        alarm = 0;
+        programModeOn(); // Program Mode cycles through RGB waiting to read a new card
+      }
+      else if ( isDelete( readCard ) ) // Check to see if the card is the deletion card
+      {
+        Serial.println("Delete!");
+        deleteMode = 1; // If so, enable deletion mode
+        tmOut = millis();
+        alarm = 0;
+        deleteModeOn(); // Delete Mode cycles through RB waiting to read a new card
+      }
+      else if ( isWipe( readCard ) ) // Check to see if the card is the deletion card
+      {
+        Serial.println("Wipe!");
+        WipeMemory();
+      }
+      else
+      {
+        if ( findID(readCard) >= 0 ) // If not, see if the card is in the EEPROM
+        {
+          Serial.println("Valid card - press button!");
+          openDoor(1); // If it is, open the door lock
+          alarm = 0;
+        }
+        else
+        {
+          Serial.println("Unknown card!");
+          sendKey("fail", readCard);
+          failed(); // If not, show that the ID was not valid
+          alarm++;
+          delay(1000);
+        }
       }
     }
   }
