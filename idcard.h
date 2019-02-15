@@ -6,7 +6,7 @@ typedef struct {
   uint8_t   num;
 } EHead_t;
 
-enum Card_enum {NONE, MASTER_CARD, DELETE_CARD, WIPE_CARD};
+enum Card_enum {OTHER, MASTER_CARD, DELETE_CARD, WIPE_CARD};
 
 extern RFIDtag storedCard;  // Stores an ID read from EEPROM
 extern RFIDtag readCard;    // Sotres an ID read from the RFID reader

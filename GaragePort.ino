@@ -510,12 +510,12 @@ void rfidloop()
       // Program mode to add a new ID card
       Serial.println("Program mode!");
       // Check to see if it is the master programing card or delete card
-      if (whichCard(readCard) == NONE) {
-        if( writeID(readCard) ) // If not, write the card to the EEPROM storage
+      if (whichCard(readCard) == OTHER) {
+        if( writeID(readCard) ) { // If not, write the card to the EEPROM storage
+          sendKey("add", readCard);
           successWrite();
-        else
+        } else
           failedWrite();
-        sendKey("add", readCard);
         normalModeOn();
       }
       break;
@@ -523,12 +523,12 @@ void rfidloop()
       // Delete mode to delete an added ID card
       Serial.println("Delete mode!");
       // Check to see if it is the master programing card or the Delete Card
-      if (whichCard(readCard) == NONE) {
-        if( deleteID(readCard ) ) // If not, delete the card from the EEPROM sotrage
+      if (whichCard(readCard) == OTHER) {
+        if( deleteID(readCard ) ) { // If not, delete the card from the EEPROM sotrage
+          sendKey("del", readCard);
           successWrite();
-        else
+        } else
           failedWrite();
-        sendKey("del", readCard);
         normalModeOn();
       }
       break;
@@ -557,7 +557,7 @@ void rfidloop()
         Serial.println("Wipe!");
         WipeMemory();
         break;
-      case NONE:
+      case OTHER:
         if (findID(readCard) >= 0) // If not, see if the card is in the EEPROM
         {
           Serial.println("Valid card - press button!");

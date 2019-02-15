@@ -38,7 +38,7 @@ uint8_t whichCard( RFIDtag test )
   if( isMaster(test) ) return MASTER_CARD;
   if( isDelete(test) ) return DELETE_CARD;
   if( isWipe(test) ) return WIPE_CARD;
-  return NONE;
+  return OTHER;
 }
 
 void printTag( RFIDtag tag )
