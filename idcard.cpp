@@ -11,9 +11,9 @@ RFIDtag readCard;    // Sotres an ID read from the RFID reader
 #define HASH_TAG  0x5117BEEF
 #define EEROM_SIZE  512
 
-RFIDtag masterCard("03001303F500");
-RFIDtag wipeCard("030074914800");
-RFIDtag deleteCard("03001303E200");
+RFIDtag masterCard("03001303F5E6");
+RFIDtag wipeCard("0300749148AE");
+RFIDtag deleteCard("03001303E2F1");
 
 // Check to see if the ID passed is the master programing card
 boolean isMaster( RFIDtag test )
@@ -160,7 +160,7 @@ int findID( RFIDtag find )
   snprintf (msg, MSG_LEN, "Count: %d\n\n", eHead.num); // stores the number of ID's in EEPROM
   Serial.print(msg);
 #endif//RX_DEBUG
-  for ( int i = 0; i < eHead.num; i++ ) // Loop once for each EEPROM entry
+  for ( int i = 1; i <= eHead.num; i++ ) // Loop once for each EEPROM entry
   {
     readID(i); // Read an ID from EEPROM, it is stored in storedCard[6]
     if ( find == storedCard ) // Check to see if the storedCard read from EEPROM

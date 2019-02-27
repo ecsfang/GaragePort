@@ -7,14 +7,14 @@
 #include "idcard.h"
 #include "mySSID.h"
 
-//#define RX_DEBUG 1
+#define RX_DEBUG 1
 //#define USE_INTERRUPT
 
 #define failPin   D5 // 14 // Red LED
 #define passPin   D6 // 12 // Green LED
-#define relayPin  D2 //  4 // Relay
-#define rfidPinRx D1 //  5 // RDM630 Reader
-#define rfidPinTx D3 //  0 // RDM630 Reader
+#define relayPin  4 //D2 //  4 // Relay
+#define rfidPinRx 5 // D1 //  5 // RDM630 Reader
+#define rfidPinTx 0 //D3 //  0 // RDM630 Reader
 #ifdef USE_INTERRUPT
 #  define cardInt   D8 // 15 // RDM630 interrupt
 #endif
@@ -26,6 +26,7 @@ enum Mode_enum {IDLE, PROGRAM, DELETE, WIPE};
 enum Door_enum {UNKNOWN, DOOR_OPEN, DOOR_CLOSED};
 
 uint8_t mode = IDLE;
+bool bNewMode = false;
 
 int alarm = 0; // Extra Security
 
@@ -78,6 +79,9 @@ void setup() {
 #ifdef RX_DEBUG
   delay(2500);
   Serial.println("\n\nBooting ...");
+  Serial.print("\n\nDoor pin: ");
+  Serial.println(relayPin);
+  flashLed("G0R0", 10, BLINK_DLY/2);
 #endif
 
   WiFi.mode(WIFI_STA);
@@ -247,8 +251,9 @@ void sendMsg(const char *m)
 
 void sendKey( const char *m, RFIDtag card )
 {
-  snprintf (msg, MSG_LEN, "%s %s", m, card.getTag());
-  sendMsg(msg);
+//  static char msgBuf[MSG_LEN];
+//  snprintf (msgBuf, MSG_LEN, "%s %s", m, card.getTag());
+  sendMsg(m, card.getTag());
 }
 
 void checkDoor() {
@@ -266,6 +271,7 @@ void checkDoor() {
     }
     doorStatus = b;
     delay(20);
+    Serial.println("Done!");
   }
 }
 
@@ -366,6 +372,7 @@ void normalModeOn()
   digitalWrite(failPin,  LOW); // Make sure Red LED is off
   digitalWrite(relayPin, LOW); // Make sure Door is Locked
   mode = IDLE;
+  bNewMode = false;
 }
 
 // Controls LED's for program mode, cycles through RGB
@@ -380,9 +387,10 @@ void programModeOn()
   lastMsg = now;
 
 #ifdef RX_DEBUG
-  if( programMode==1 )
+  if( !bNewMode )
     Serial.println("Program mode on!");
 #endif
+  bNewMode = true;
 
   digitalWrite(failPin, led & 1 ? HIGH : LOW); // Toggle red led ...
   digitalWrite(passPin, led & 1 ? LOW : HIGH); // Toggle green led ...
@@ -404,9 +412,10 @@ void deleteModeOn()
   lastMsg = now;
 
 #ifdef RX_DEBUG
-  if( deleteMode==1 )
+  if( !bNewMode )
     Serial.println("Delete mode on!");
 #endif
+  bNewMode = true;
 
   digitalWrite(passPin, LOW); // Green led off ...
   digitalWrite(failPin, led & 1 ? HIGH : LOW); // Toggle red led ...
