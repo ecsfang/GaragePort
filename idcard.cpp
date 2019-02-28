@@ -8,7 +8,7 @@ RFIDtag readCard;    // Sotres an ID read from the RFID reader
 // Get address in EEPROM given slot number (0-n)
 #define GET_ROM_ADDRESS(n)  (((n)*sizeof(RFIDtag)) + sizeof(EHead_t))
 
-#define HASH_TAG  0x5117BEEF
+#define HASH_TAG  0x20190228
 #define EEROM_SIZE  512
 
 RFIDtag masterCard("03001303F5E6");
@@ -121,14 +121,16 @@ int listID(void)
     snprintf (msg, MSG_LEN, "No cards found in EEPROM!!\n\n");
   Serial.print(msg);
 #endif//RX_DEBUG
-  for ( int i = 0; i < eHead.num; i++ ) // Loop once for each EEPROM entry
-  {
-    readID(i); // Read an ID from EEPROM, it is stored in storedCard[6]
+  if( eHead.num ) {
+    for ( int i = 0; i < eHead.num; i++ ) // Loop once for each EEPROM entry
+    {
+      readID(i); // Read an ID from EEPROM, it is stored in storedCard[6]
 #ifdef RX_DEBUG
-    printCard("Card", i, storedCard);
+      printCard("Card", i, storedCard);
 #else
-    printKey(storedCard);
+      printKey(storedCard);
 #endif
+    }
   }
   return eHead.num;
 }
@@ -142,7 +144,7 @@ int findID( RFIDtag find )
   snprintf (msg, MSG_LEN, "Count: %d\n\n", eHead.num); // stores the number of ID's in EEPROM
   Serial.print(msg);
 #endif//RX_DEBUG
-  for ( int i = 1; i <= eHead.num; i++ ) // Loop once for each EEPROM entry
+  for ( int i = 0; i < eHead.num; i++ ) // Loop once for each EEPROM entry
   {
     readID(i); // Read an ID from EEPROM, it is stored in storedCard[6]
     if ( find == storedCard ) // Check to see if the storedCard read from EEPROM
@@ -164,9 +166,9 @@ bool writeID( RFIDtag newCard )
 
   EHead_t eHead;
   EEPROM.get(0, eHead); // Get the number of used slots ...
-  eHead.num++; // Increment the counter by one
   int start = GET_ROM_ADDRESS(eHead.num); // Figure out where the next slot starts
   EEPROM.put(start, newCard);
+  eHead.num++; // Increment the counter by one
   EEPROM.put( 0, eHead ); // Write the new count to the counter
   printCard("Write", eHead.num, newCard);
   EEPROM.commit();
@@ -196,14 +198,14 @@ bool deleteID( RFIDtag a )
     Serial.print(msg);
 #endif//RX_DEBUG
 
+    eHead.num--; // Decrement the counter by one
     // Shift down rest of the entries ...
-    for ( ; slot < (eHead.num-1); slot++ ) // Loop the card shift times
+    for ( ; slot < eHead.num; slot++ ) // Loop the card shift times
     {
       // Shift the array values down one step in the EEPROM
       EEPROM.get(GET_ROM_ADDRESS(slot+1), storedCard);
       EEPROM.put(GET_ROM_ADDRESS(slot), storedCard);
     }
-    eHead.num--; // Decrement the counter by one
     EEPROM.put( 0, eHead ); // Write the new count to the counter
     EEPROM.commit();
   }

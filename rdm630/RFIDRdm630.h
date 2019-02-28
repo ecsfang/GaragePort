@@ -54,7 +54,7 @@ P3:
 #include <SoftwareSerial.h>
 #include "Arduino.h"
 
-const int _startTag = 2;                 //Value corresponding the init of the transmission
+const int _startTag = 2;                 // Value corresponding the init of the transmission
 const int _endTag = 3;                   // value corresponding the end of the transmission
 const static int _tagLength = 12;        // number of ascii characters of the tag
 const int _totalLength = _tagLength + 2; // total length of transmission.
