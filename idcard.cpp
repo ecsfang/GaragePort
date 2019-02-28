@@ -12,32 +12,14 @@ RFIDtag readCard;    // Sotres an ID read from the RFID reader
 #define EEROM_SIZE  512
 
 RFIDtag masterCard("03001303F5E6");
-RFIDtag wipeCard("0300749148AE");
 RFIDtag deleteCard("03001303E2F1");
-
-// Check to see if the ID passed is the master programing card
-boolean isMaster( RFIDtag test )
-{
-  return test == masterCard;
-}
-
-// Check to see if the ID passed is the wipe memory card
-boolean isWipe( RFIDtag test )
-{
-  return test == wipeCard;
-}
-
-// Check to see if the ID passed is the deletion card
-boolean isDelete( RFIDtag test )
-{
-  return test == deleteCard;
-}
+RFIDtag wipeCard("0300749148AE");
 
 uint8_t whichCard( RFIDtag test )
 {
-  if( isMaster(test) ) return MASTER_CARD;
-  if( isDelete(test) ) return DELETE_CARD;
-  if( isWipe(test) ) return WIPE_CARD;
+  if( test == masterCard ) return MASTER_CARD;
+  if( test == deleteCard ) return DELETE_CARD;
+  if( test == wipeCard ) return WIPE_CARD;
   return OTHER;
 }
 

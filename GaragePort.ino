@@ -10,15 +10,15 @@
 #define RX_DEBUG 1
 //#define USE_INTERRUPT
 
-#define failPin   D5 // 14 // Red LED
-#define passPin   D6 // 12 // Green LED
-#define relayPin  4 //D2 //  4 // Relay
-#define rfidPinRx 5 // D1 //  5 // RDM630 Reader
-#define rfidPinTx 0 //D3 //  0 // RDM630 Reader
+#define failPin     D5 // 14 // Red LED
+#define passPin     D6 // 12 // Green LED
+#define relayPin    D4 //  4 // Relay
+#define rfidPinRx   D3 //  5 // RDM630 Reader
+#define rfidPinTx   D8 //  0 // RDM630 Reader
+#define sensorPin   D7 // 13 // Door switch
 #ifdef USE_INTERRUPT
-#  define cardInt   D8 // 15 // RDM630 interrupt
+#  define cardInt   D10 // 15 // RDM630 interrupt
 #endif
-#define sensorPin D7 // 13 // Door switch
 
 #define CARD_LEN    5
 
@@ -30,7 +30,8 @@ bool bNewMode = false;
 
 int alarm = 0; // Extra Security
 
-int doorStatus = UNKNOWN;
+int oldDoorStatus = UNKNOWN;
+int newDoorStatus = UNKNOWN;
 
 #define PULSE_TIME 1000 // Heartbeat - 1 Hz
 #define BLINK_DLY 200
@@ -41,6 +42,7 @@ unsigned long beatStart = 0;        // the time the delay started
 bool          beatRunning = false;  // true if still waiting for delay to finish
 
 void checkDoor();
+void updateDoor();
 void openDoor( int setDelay );
 void flashLed(char *ledPgm, int loop, int dly);
 void rfidloop();
@@ -52,9 +54,6 @@ PubSubClient client(espClient);
 
 long lastMsg = 0;
 long tmOut = 0;
-
-#define MSG_LEN 50
-char msg[MSG_LEN];
 
 long g_now = 0;
 long g_tmo = 0;
@@ -79,9 +78,7 @@ void setup() {
 #ifdef RX_DEBUG
   delay(2500);
   Serial.println("\n\nBooting ...");
-  Serial.print("\n\nDoor pin: ");
-  Serial.println(relayPin);
-  flashLed("G0R0", 10, BLINK_DLY/2);
+  flashLed("G0R0", 5, BLINK_DLY/2);
 #endif
 
   WiFi.mode(WIFI_STA);
@@ -183,7 +180,7 @@ void callback(char* topic, byte* payload, unsigned int length) {
 
  if(strcmp(topic, "toGarage/door/status") == 0)
  {
-  doorStatus = UNKNOWN;
+  oldDoorStatus = UNKNOWN;
   checkDoor();
  }
 
@@ -229,6 +226,8 @@ void reconnect() {
 
 void sendMsg(const char *topic, const char *m)
 {
+  #define MSG_LEN 32
+  char msg[MSG_LEN];
   int n = 0;
   if (client.connected()) {
     n = snprintf (msg, MSG_LEN, "fromGarage");
@@ -251,14 +250,11 @@ void sendMsg(const char *m)
 
 void sendKey( const char *m, RFIDtag card )
 {
-//  static char msgBuf[MSG_LEN];
-//  snprintf (msgBuf, MSG_LEN, "%s %s", m, card.getTag());
   sendMsg(m, card.getTag());
 }
 
-void checkDoor() {
-  uint8_t b = digitalRead(sensorPin) ? DOOR_OPEN : DOOR_CLOSED;
-  if( b != doorStatus ) {
+void updateDoor() {
+  if( newDoorStatus != oldDoorStatus ) {
     switch(b) {
       case DOOR_OPEN:
         Serial.println("Door is open!");
@@ -269,10 +265,14 @@ void checkDoor() {
         sendMsg("status", "closed");
         break;
     }
-    doorStatus = b;
+    oldDoorStatus = newDoorStatus;
     delay(20);
     Serial.println("Done!");
   }
+}
+
+void checkDoor() {
+  newDoorStatus = digitalRead(sensorPin) ? DOOR_OPEN : DOOR_CLOSED;
 }
 
 void loop() {
@@ -323,13 +323,14 @@ void loop() {
     // New heartbeat ...
     if( (heartBeat % (10*60)) == 0 ) {
       // Check the door every 10 minutes ...
-      doorStatus = UNKNOWN;
+      oldDoorStatus = UNKNOWN;
       checkDoor();
     }
     // Update beat counter ...
     beatStart += PULSE_TIME; // this prevents drift in the delays
     heartBeat++;
   }
+  updateDoor();
 }
 
 // Opens door and turns on the green LED for setDelay seconds
@@ -425,38 +426,20 @@ void deleteModeOn()
     normalModeOn();
 }
 
+#define XOR(a,b)  ((!a) != (!b))
 void flashLed(char *ledPgm, int loop, int dly)
 {
   char *led;
   while( loop-- ) {
     led = ledPgm;
     while(*led) {
-      switch(*led++) {
-        case '0':
-          Serial.print("0");
-          digitalWrite(failPin, LOW); // Make sure red LED is off
-          digitalWrite(passPin, LOW); // Make sure green LED is off
-          break;
-        case 'R':
-          Serial.print("R");
-          digitalWrite(failPin, HIGH); // Make sure red LED is on
-          digitalWrite(passPin, LOW); // Make sure green LED is off
-          break;
-        case 'G':
-          Serial.print("G");
-          digitalWrite(failPin, LOW); // Make sure red LED is off
-          digitalWrite(passPin, HIGH); // Make sure green LED is on
-          break;
-        case '*':
-          Serial.print("*");
-          digitalWrite(failPin, HIGH); // Make sure red LED is on
-          digitalWrite(passPin, HIGH); // Make sure green LED is on
-          break;
-      }
+      // Note! This bit fiddling trick only works for ascii 0, R, G or *
+      digitalWrite(failPin, XOR(*led&0x10, *led&0x20) ? HIGH : LOW); // Set red LED
+      digitalWrite(passPin, (*led&0x09) ? HIGH : LOW); // Setgreen LED
       delay(dly);
+      led++;
     }
   }
-  Serial.println();
 }
 // Flashes the green LED 3 times to indicate a successful write to EEPROM
 void successWrite()
