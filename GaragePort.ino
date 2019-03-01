@@ -4,6 +4,7 @@
 #include <ArduinoOTA.h>
 #include <PubSubClient.h>
 #include <RFIDRdm630.h>
+#include <Ticker.h>
 #include "idcard.h"
 #include "mySSID.h"
 
@@ -33,15 +34,13 @@ int alarm = 0; // Extra Security
 int oldDoorStatus = UNKNOWN;
 int newDoorStatus = UNKNOWN;
 
-#define PULSE_TIME 1000 // Heartbeat - 1 Hz
 #define BLINK_DLY 200
 #define TIMEOUT_DLY 5000
 
-unsigned int  heartBeat = 0;
-unsigned long beatStart = 0;        // the time the delay started
-bool          beatRunning = false;  // true if still waiting for delay to finish
+Ticker flipper;
 
 void checkDoor();
+void doCheckDoor();
 void updateDoor();
 void openDoor( int setDelay );
 void flashLed(char *ledPgm, int loop, int dly);
@@ -149,13 +148,9 @@ void setup() {
   client.setServer(mqtt_server, 1883);
   client.setCallback(callback);
 
-  // Once connected, publish an announcement...
-  sendMsg("ready");
   listID();
   g_now = millis();
-  beatStart = millis();
   g_tmo = 0;  // WiFi timeout ...
-  beatRunning = true;
 
   // Start keeping an eye on the door-switch ...
   attachInterrupt(digitalPinToInterrupt(sensorPin), checkDoor, CHANGE);
@@ -163,6 +158,10 @@ void setup() {
   // ... and the RFID-reader ...
   attachInterrupt(digitalPinToInterrupt(cardInt), rfidloop, FALLING);
 #endif
+  // fCheck the door every 5 minutes
+  flipper.attach(5*60, doCheckDoor);
+  // Once connected and done, publish an announcement...
+  sendMsg("ready");
 }
 
 void callback(char* topic, byte* payload, unsigned int length) {
@@ -180,8 +179,7 @@ void callback(char* topic, byte* payload, unsigned int length) {
 
  if(strcmp(topic, "toGarage/door/status") == 0)
  {
-  oldDoorStatus = UNKNOWN;
-  checkDoor();
+  doCheckDoor();
  }
 
  if(strcmp(topic, "toGarage/door/open") == 0)
@@ -267,12 +265,18 @@ void updateDoor() {
     }
     oldDoorStatus = newDoorStatus;
     delay(20);
-    Serial.println("Done!");
   }
 }
 
+// Check the door status
 void checkDoor() {
   newDoorStatus = digitalRead(sensorPin) ? DOOR_OPEN : DOOR_CLOSED;
+}
+
+// Force a check and update on the door status
+void doCheckDoor() {
+  oldDoorStatus = UNKNOWN;
+  checkDoor();
 }
 
 void loop() {
@@ -319,17 +323,6 @@ void loop() {
     break;
   }
 
-  if (beatRunning && ((millis() - beatStart) >= PULSE_TIME)) {
-    // New heartbeat ...
-    if( (heartBeat % (10*60)) == 0 ) {
-      // Check the door every 10 minutes ...
-      oldDoorStatus = UNKNOWN;
-      checkDoor();
-    }
-    // Update beat counter ...
-    beatStart += PULSE_TIME; // this prevents drift in the delays
-    heartBeat++;
-  }
   updateDoor();
 }
 
