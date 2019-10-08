@@ -1,3 +1,5 @@
+#include <Stepper.h>
+
 #include <ESP8266WiFi.h>
 #include <ESP8266mDNS.h>
 #include <WiFiUdp.h>
@@ -253,7 +255,7 @@ void sendKey( const char *m, RFIDtag card )
 
 void updateDoor() {
   if( newDoorStatus != oldDoorStatus ) {
-    switch(b) {
+    switch(newDoorStatus) {
       case DOOR_OPEN:
         Serial.println("Door is open!");
         sendMsg("status", "open");
