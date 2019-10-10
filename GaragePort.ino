@@ -9,21 +9,15 @@
 #include <Ticker.h>
 #include "idcard.h"
 #include "mySSID.h"
+#include "config.h"
 
-#define RX_DEBUG 1
-//#define USE_INTERRUPT
-
-#define failPin     D5 // 14 // Red LED
-#define passPin     D6 // 12 // Green LED
-#define relayPin    D4 //  4 // Relay
-#define rfidPinRx   D3 //  5 // RDM630 Reader
-#define rfidPinTx   D8 //  0 // RDM630 Reader
-#define sensorPin   D7 // 13 // Door switch
-#ifdef USE_INTERRUPT
-#  define cardInt   D10 // 15 // RDM630 interrupt
-#endif
-
-#define CARD_LEN    5
+const char* door_alias = DOOR1_ALIAS;
+const char* mqtt_door_action_topic = MQTT_DOOR1_ACTION_TOPIC;
+const char* mqtt_door_status_topic = MQTT_DOOR1_STATUS_TOPIC;
+const int door_openPin = DOOR1_OPEN_PIN;
+const int door_closePin = DOOR1_CLOSE_PIN;
+const int door_statusPin = DOOR1_STATUS_PIN;
+const char* door_statusSwitchLogic = DOOR1_STATUS_SWITCH_LOGIC;
 
 enum Mode_enum {IDLE, PROGRAM, DELETE, WIPE};
 enum Door_enum {UNKNOWN, DOOR_OPEN, DOOR_CLOSED};
@@ -36,17 +30,21 @@ int alarm = 0; // Extra Security
 int oldDoorStatus = UNKNOWN;
 int newDoorStatus = UNKNOWN;
 
-#define BLINK_DLY 200
-#define TIMEOUT_DLY 5000
-
 Ticker flipper;
 
 void checkDoor();
 void doCheckDoor();
 void updateDoor();
-void openDoor( int setDelay );
+void openDoor(int doorPin, int setDelay );
 void flashLed(char *ledPgm, int loop, int dly);
 void rfidloop();
+
+String availabilityBase = mqtt_client;
+String availabilitySuffix = "/availability";
+String availabilityTopicStr = availabilityBase + availabilitySuffix;
+const char* availabilityTopic = availabilityTopicStr.c_str();
+const char* birthMessage = "online";
+const char* lwtMessage = "offline";
 
 RFIDRdm630 reader = RFIDRdm630(rfidPinRx,rfidPinTx);    // the reader object.
 
@@ -167,6 +165,23 @@ void setup() {
 }
 
 void callback(char* topic, byte* payload, unsigned int length) {
+  Serial.print("Message arrived [");
+  Serial.print(topic);
+  Serial.print("] ");
+  
+  for (int i = 0; i < length; i++) {
+    Serial.print((char)payload[i]);
+  }
+  
+  Serial.println();
+
+  String topicToProcess = topic;
+  payload[length] = '\0';
+  String payloadToProcess = (char*)payload;
+  triggerDoorAction(topicToProcess, payloadToProcess);
+}
+/*
+void callback(char* topic, byte* payload, unsigned int length) {
   String strTopic = String((char*)topic);
 
 #ifdef RX_DEBUG
@@ -194,6 +209,89 @@ void callback(char* topic, byte* payload, unsigned int length) {
   openDoor(1);
  }
 }
+***/
+
+// Function called by callback() when a message is received 
+// Passes the message topic as the "requestedDoor" parameter and the message payload as the "requestedAction" parameter
+
+void triggerDoorAction(String requestedDoor, String requestedAction) {
+  if (requestedDoor == mqtt_door_action_topic && requestedAction == "OPEN") {
+    Serial.print("Triggering ");
+    Serial.print(door_alias);
+    Serial.println(" OPEN relay!");
+    openDoor(door_openPin, 1);
+  }
+  else if (requestedDoor == mqtt_door_action_topic && requestedAction == "CLOSE") {
+    Serial.print("Triggering ");
+    Serial.print(door_alias);
+    Serial.println(" CLOSE relay!");
+    openDoor(door_closePin, 1);
+  }
+  else if (requestedDoor == mqtt_door_action_topic && requestedAction == "STATE") {
+    Serial.print("Publishing on-demand status update for ");
+    Serial.print(door_alias);
+    Serial.println("!");
+    publish_birth_message();
+    publish_door_status();
+  }
+  else { Serial.println("Unrecognized action payload... taking no action!");
+  }
+}
+
+// Functions that check door status and publish an update when called
+
+void publish_door_status() {
+  if (digitalRead(door_statusPin) == LOW) {
+    if (door_statusSwitchLogic == "NO") {
+      Serial.print(door_alias);
+      Serial.print(" closed! Publishing to ");
+      Serial.print(mqtt_door_status_topic);
+      Serial.println("...");
+      client.publish(mqtt_door_status_topic, "closed", true);
+    }
+    else if (door_statusSwitchLogic == "NC") {
+      Serial.print(door_alias);
+      Serial.print(" open! Publishing to ");
+      Serial.print(mqtt_door_status_topic);
+      Serial.println("...");
+      client.publish(mqtt_door_status_topic, "open", true);      
+    }
+    else {
+      Serial.println("Error! Specify only either NO or NC for DOOR_STATUS_SWITCH_LOGIC! Not publishing...");
+    }
+  }
+  else {
+    if (door_statusSwitchLogic == "NO") {
+      Serial.print(door_alias);
+      Serial.print(" open! Publishing to ");
+      Serial.print(mqtt_door_status_topic);
+      Serial.println("...");
+      client.publish(mqtt_door_status_topic, "open", true);
+    }
+    else if (door_statusSwitchLogic == "NC") {
+      Serial.print(door_alias);
+      Serial.print(" closed! Publishing to ");
+      Serial.print(mqtt_door_status_topic);
+      Serial.println("...");
+      client.publish(mqtt_door_status_topic, "closed", true);      
+    }
+    else {
+      Serial.println("Error! Specify only either NO or NC for DOOR_STATUS_SWITCH_LOGIC! Not publishing...");
+    }
+  }
+}
+
+// Function that publishes birthMessage
+
+void publish_birth_message() {
+  // Publish the birthMessage
+  Serial.print("Publishing birth message \"");
+  Serial.print(birthMessage);
+  Serial.print("\" to ");
+  Serial.print(availabilityTopic);
+  Serial.println("...");
+  client.publish(availabilityTopic, birthMessage, true);
+}
 
 void reconnect() {
   // Loop until we're reconnected
@@ -202,11 +300,13 @@ void reconnect() {
     Serial.print("Attempting another MQTT connection...");
 #endif
     // Attempt to connect
-    if (client.connect("theGarageClient")) {
+    if (client.connect(mqtt_client, mqtt_user, mqtt_pass, availabilityTopic, 0, true, lwtMessage)) {
       digitalWrite(passPin, HIGH); // Turn on green LED
       Serial.println("connected");
-      // Once connected, publish an announcement...
-      sendMsg("ready");
+
+      // Publish the birth message on connect/reconnect
+      publish_birth_message();
+
       // ... and resubscribe
       client.subscribe("toGarage/#");
       delay(250);
@@ -329,18 +429,18 @@ void loop() {
 }
 
 // Opens door and turns on the green LED for setDelay seconds
-void openDoor( int setDelay )
+void openDoor(int doorPin,  int setDelay )
 {
   Serial.print("Open door!\n");
   sendKey("key", readCard);
   setDelay *= 1000; // Sets delay in seconds
   digitalWrite(failPin, LOW); // Turn off red LED
   digitalWrite(passPin, HIGH); // Turn on green LED
-  digitalWrite(relayPin, HIGH); // Unlock door!
+  digitalWrite(doorPin, HIGH); // Unlock door!
 
   delay(setDelay); // Hold door lock open for some seconds
 
-  digitalWrite(relayPin, LOW); // Relock door
+  digitalWrite(doorPin, LOW); // Relock door
 
   delay(setDelay); // Hold green LED on for some more seconds
 
@@ -548,7 +648,7 @@ void rfidloop()
         if (findID(readCard) >= 0) // If not, see if the card is in the EEPROM
         {
           Serial.println("Valid card - press button!");
-          openDoor(1); // If it is, open the door lock
+          openDoor(relayPin, 1); // If it is, open the door lock
           alarm = 0;
         }
         else
