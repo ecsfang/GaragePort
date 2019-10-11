@@ -1,5 +1,3 @@
-#include <Stepper.h>
-
 #include <ESP8266WiFi.h>
 #include <ESP8266mDNS.h>
 #include <WiFiUdp.h>
@@ -14,9 +12,9 @@
 const char* door_alias = DOOR1_ALIAS;
 const char* mqtt_door_action_topic = MQTT_DOOR1_ACTION_TOPIC;
 const char* mqtt_door_status_topic = MQTT_DOOR1_STATUS_TOPIC;
-const int door_openPin = DOOR1_OPEN_PIN;
-const int door_closePin = DOOR1_CLOSE_PIN;
-const int door_statusPin = DOOR1_STATUS_PIN;
+const int   door_openPin = DOOR1_OPEN_PIN;
+const int   door_closePin = DOOR1_CLOSE_PIN;
+const int   door_statusPin = DOOR1_STATUS_PIN;
 const char* door_statusSwitchLogic = DOOR1_STATUS_SWITCH_LOGIC;
 
 enum Mode_enum {IDLE, PROGRAM, DELETE, WIPE};
@@ -24,8 +22,6 @@ enum Door_enum {UNKNOWN, DOOR_OPEN, DOOR_CLOSED};
 
 uint8_t mode = IDLE;
 bool bNewMode = false;
-
-int alarm = 0; // Extra Security
 
 int oldDoorStatus = UNKNOWN;
 int newDoorStatus = UNKNOWN;
@@ -73,8 +69,6 @@ void setup() {
   digitalWrite(passPin,  LOW);
   digitalWrite(door_openPin, LOW);
 
-  alarm = 0;
-
   Serial.begin(115200);
 
 #ifdef RX_DEBUG
@@ -110,9 +104,7 @@ void setup() {
 
   if( !initEEPROM() ) {
     // Memory was re-initialized ...
-    digitalWrite(failPin, HIGH); // Blink with red/internal LED
-    delay(2000);
-    digitalWrite(failPin, LOW);
+    flashLed("R",1,2000); // Blink with red/internal LED
   }
 
   ArduinoOTA.setHostname("garageDoor");
@@ -145,7 +137,7 @@ void setup() {
   ArduinoOTA.begin();
 
 #ifdef RX_DEBUG
-  Serial.println("GaragePort v3 -- Ready!");
+  Serial.println("GaragePort v4 -- Ready!");
   Serial.print("IP address: ");
   Serial.println(WiFi.localIP());
 #endif
@@ -171,6 +163,7 @@ void setup() {
 }
 
 void callback(char* topic, byte* payload, unsigned int length) {
+#ifdef RX_DEBUG
   Serial.print("Message arrived [");
   Serial.print(topic);
   Serial.print("] ");
@@ -180,7 +173,7 @@ void callback(char* topic, byte* payload, unsigned int length) {
   }
   
   Serial.println();
-
+#endif
   String topicToProcess = topic;
   payload[length] = '\0';
   String payloadToProcess = (char*)payload;
@@ -254,14 +247,12 @@ void reconnect() {
       publishDoorStatus();
       
     } else {
-      digitalWrite(failPin, HIGH); // Turn on red LED
 #ifdef RX_DEBUG
       Serial.print("failed, rc=");
       Serial.print(client.state());
       Serial.println(" try again in 5 seconds");
 #endif
-      delay(500);
-      digitalWrite(failPin, LOW); // Turn off red LED
+      flashLed("R",1,500); // Turn on red LED
     }
   }
 }
@@ -433,15 +424,8 @@ void openDoor(int doorPin,  int setDelay, RFIDtag *who )
 // Flashes Red LED if failed login
 void failed()
 {
-  flashLed("R0", 10, 50);
-  digitalWrite(passPin, LOW); // Make sure green LED is off
   // Blink red fail LED to indicate failed key
-  for(int k=0; k<5; k++) {
-    digitalWrite(failPin, HIGH); // Turn on red LED
-    delay(100);
-    digitalWrite(failPin, LOW); // Turn on red LED
-    delay(50);
-  }
+  flashLed("RR0",50,5);
 }
 
 // Controls LED's for Normal mode, Blue on, all others off
@@ -504,7 +488,7 @@ void deleteModeOn()
     normalModeOn();
 }
 
-#define XOR(a,b)  ((!a) != (!b))
+#define XOR(a,b)   (!!(a) ^ !!(b))
 void flashLed(char *ledPgm, int loop, int dly)
 {
   char *led;
@@ -518,7 +502,10 @@ void flashLed(char *ledPgm, int loop, int dly)
       led++;
     }
   }
+  digitalWrite(failPin, LOW); // Clear red LED
+  digitalWrite(passPin, LOW); // Clear green LED
 }
+
 // Flashes the green LED 3 times to indicate a successful write to EEPROM
 void successWrite()
 {
@@ -560,7 +547,6 @@ void WipeMemory()
 {
   wipeModeOn();
   Serial.println("Wipe!");
-  alarm = 0;
   sendMsg("wipe");
   eraseEEPROM();
   normalModeOn(); // Normal mode, blue Power LED is on, all others are off
@@ -614,13 +600,11 @@ void rfidloop()
       case MASTER_CARD:
         Serial.println("Master!");
         tmOut = millis();
-        alarm = 0;
         programModeOn(); // Program Mode cycles through RGB waiting to read a new card
         break;
       case DELETE_CARD:
         Serial.println("Delete!");
         tmOut = millis();
-        alarm = 0;
         deleteModeOn(); // Delete Mode cycles through RB waiting to read a new card
         break;
       case WIPE_CARD:
@@ -632,14 +616,12 @@ void rfidloop()
         {
           Serial.println("Valid card - press button!");
           openDoor(door_openPin, 1, &readCard); // If it is, open the door lock
-          alarm = 0;
         }
         else
         {
           Serial.println("Unknown card!");
           sendKey("fail", readCard);
           failed(); // If not, show that the ID was not valid
-          alarm++;
           delay(1000);
         }
       }
